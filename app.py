@@ -216,6 +216,7 @@ mode = st.sidebar.radio("Mode", [
     "📝 Draft Board",
     "⚾ Lineup Optimizer",
     "🏟️ Lineup Construction",
+    "⚙️ Pitching Staff",
     "📖 Reference"
 ])
 
@@ -474,6 +475,13 @@ elif mode == "⚾ Lineup Optimizer":
 elif mode == "🏟️ Lineup Construction":
     import lineup_construction as lc
     lc.render_lineup_construction()
+
+# ============================================================
+# PITCHING STAFF CONSTRUCTION
+# ============================================================
+elif mode == "⚙️ Pitching Staff":
+    import pitching_staff as ps
+    ps.render_staff_construction()
 
 # ============================================================
 # REFERENCE
