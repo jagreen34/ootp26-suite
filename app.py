@@ -215,6 +215,7 @@ mode = st.sidebar.radio("Mode", [
     "🎯 Trade Targets",
     "📝 Draft Board",
     "⚾ Lineup Optimizer",
+    "🏟️ Lineup Construction",
     "📖 Reference"
 ])
 
@@ -419,7 +420,7 @@ elif mode == "📝 Draft Board":
         st.dataframe(results[cols].sort_values('GB_WAR', ascending=False), use_container_width=True, height=600)
 
 # ============================================================
-# LINEUP OPTIMIZER
+# LINEUP OPTIMIZER (legacy F1-based)
 # ============================================================
 elif mode == "⚾ Lineup Optimizer":
     st.header("Lineup Optimizer")
@@ -466,6 +467,13 @@ elif mode == "⚾ Lineup Optimizer":
                 st.write(f"**{pos}:** {name} (F1 = {f1})")
                 total += f1
         st.write(f"**Total Lineup F1: {total:.1f}**")
+
+# ============================================================
+# LINEUP CONSTRUCTION (new — Hungarian + batting order)
+# ============================================================
+elif mode == "🏟️ Lineup Construction":
+    import lineup_construction as lc
+    lc.render_lineup_construction()
 
 # ============================================================
 # REFERENCE
