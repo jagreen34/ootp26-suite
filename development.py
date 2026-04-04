@@ -191,49 +191,133 @@ def calc_pitcher_sliders(row):
     if total == 0:
         return {'main': {k: 50 for k in priorities}, 'pitches': {}}
 
+    # Distribute budget proportionally
     sliders = {}
     for name, prio in priorities.items():
         sliders[name] = (prio / total) * BUDGET
 
-    for _ in range(10):
-        excess = 0
-        n_free = 0
+    # Clamp and redistribute iteratively
+    for _ in range(20):
+        # Clamp first
+        clamped = False
         for name, val in sliders.items():
             if val > MAX_SLIDER:
-                excess += val - MAX_SLIDER
                 sliders[name] = MAX_SLIDER
+                clamped = True
             elif val < MIN_SLIDER:
-                excess -= MIN_SLIDER - val
                 sliders[name] = MIN_SLIDER
-            else:
-                n_free += 1
-        if abs(excess) < 0.5 or n_free == 0:
+                clamped = True
+
+        if not clamped:
             break
-        per_free = excess / n_free
-        for name, val in sliders.items():
-            if MIN_SLIDER < val < MAX_SLIDER:
-                sliders[name] = max(MIN_SLIDER, min(MAX_SLIDER, val + per_free))
+
+        # Check how far off budget we are after clamping
+        current_sum = sum(sliders.values())
+        diff = BUDGET - current_sum
+        if abs(diff) < 0.5:
+            break
+
+        # Distribute remaining to non-maxed sliders
+        adjustable = [n for n, v in sliders.items() if MIN_SLIDER < v < MAX_SLIDER]
+        if not adjustable:
+            # All clamped — spread excess to min-clamped sliders
+            min_sliders = [n for n, v in sliders.items() if v == MIN_SLIDER]
+            if min_sliders and diff > 0:
+                per_adj = diff / len(min_sliders)
+                for name in min_sliders:
+                    sliders[name] = min(MAX_SLIDER, sliders[name] + per_adj)
+            break
+        else:
+            per_adj = diff / len(adjustable)
+            for name in adjustable:
+                sliders[name] = max(MIN_SLIDER, min(MAX_SLIDER, sliders[name] + per_adj))
 
     sliders = {k: int(round(v)) for k, v in sliders.items()}
+
+    # Final nudge to hit exact budget
     diff = BUDGET - sum(sliders.values())
     if diff != 0:
-        top = max(priorities, key=priorities.get)
-        sliders[top] = max(MIN_SLIDER, min(MAX_SLIDER, sliders[top] + diff))
+        sorted_by_prio = sorted(priorities, key=priorities.get)
+        for name in sorted_by_prio:
+            if diff == 0:
+                break
+            room = MAX_SLIDER - sliders[name] if diff > 0 else sliders[name] - MIN_SLIDER
+            add = min(abs(diff), room) * (1 if diff > 0 else -1)
+            sliders[name] += add
+            diff -= add
 
-    # Pitch type sliders — focus on best 2-3 pitches
-    pitch_sliders = {}
+    # Pitch type sliders — separate zero-sum pool
+    # Budget = number_of_pitches × 50
+    MIN_SLIDER = 10
+    MAX_SLIDER = 90
+    
+    pitch_priorities = {}
     for pitch, pot_col in PITCH_TYPE_MAP.items():
         current = _safe(row.get(pitch, 0))
         potential = _safe(row.get(pot_col, 0))
         if current > 0 or potential > 20:  # Has this pitch
             gap = max(0, potential - current)
-            pitch_sliders[pitch] = {'current': int(current), 'potential': int(potential),
-                                    'gap': int(gap), 'priority': int(gap * potential / 80)}
+            # Weight by potential — develop your best pitches, not your worst
+            weight = potential / 80.0 if potential > 0 else 0.1
+            pitch_priorities[pitch] = {
+                'current': int(current),
+                'potential': int(potential),
+                'gap': int(gap),
+                'weighted_priority': weight * gap,
+            }
+
+    n_pitches = len(pitch_priorities)
+    if n_pitches > 0:
+        PITCH_BUDGET = n_pitches * 50
+        total_pitch_prio = sum(p['weighted_priority'] for p in pitch_priorities.values())
+
+        if total_pitch_prio == 0:
+            # All pitches at ceiling — even distribution
+            for pitch in pitch_priorities:
+                pitch_priorities[pitch]['slider'] = 50
+        else:
+            # Distribute budget proportionally
+            raw_sliders = {}
+            for pitch, info in pitch_priorities.items():
+                raw_sliders[pitch] = (info['weighted_priority'] / total_pitch_prio) * PITCH_BUDGET
+
+            # Clamp and redistribute
+            for _ in range(10):
+                excess = 0
+                n_free = 0
+                for p, val in raw_sliders.items():
+                    if val > MAX_SLIDER:
+                        excess += val - MAX_SLIDER
+                        raw_sliders[p] = MAX_SLIDER
+                    elif val < MIN_SLIDER:
+                        excess -= MIN_SLIDER - val
+                        raw_sliders[p] = MIN_SLIDER
+                    else:
+                        n_free += 1
+                if abs(excess) < 0.5 or n_free == 0:
+                    break
+                per_free = excess / n_free
+                for p, val in raw_sliders.items():
+                    if MIN_SLIDER < val < MAX_SLIDER:
+                        raw_sliders[p] = max(MIN_SLIDER, min(MAX_SLIDER, val + per_free))
+
+            # Round and finalize
+            for pitch in pitch_priorities:
+                pitch_priorities[pitch]['slider'] = int(round(raw_sliders[pitch]))
+
+            # Nudge to hit exact budget
+            current_sum = sum(p['slider'] for p in pitch_priorities.values())
+            diff = PITCH_BUDGET - current_sum
+            if diff != 0:
+                top_pitch = max(pitch_priorities, key=lambda p: pitch_priorities[p]['weighted_priority'])
+                pitch_priorities[top_pitch]['slider'] = max(MIN_SLIDER, min(MAX_SLIDER,
+                    pitch_priorities[top_pitch]['slider'] + diff))
 
     # Sort pitches by priority
-    pitch_sliders = dict(sorted(pitch_sliders.items(), key=lambda x: x[1]['priority'], reverse=True))
+    pitch_priorities = dict(sorted(pitch_priorities.items(),
+        key=lambda x: x[1]['weighted_priority'], reverse=True))
 
-    return {'main': sliders, 'pitches': pitch_sliders}
+    return {'main': sliders, 'pitches': pitch_priorities}
 
 
 def generate_dev_plan(df):
@@ -260,12 +344,16 @@ def generate_dev_plan(df):
             main = result['main']
             pitches = result['pitches']
 
-            # Format pitch recommendations
+            # Format pitch recommendations with slider values
             pitch_recs = []
-            for p, info in list(pitches.items())[:3]:  # Top 3 pitches
-                pitch_recs.append(f"{p}: {info['current']}→{info['potential']} (gap {info['gap']})")
+            pitch_sum = 0
+            for p, info in list(pitches.items()):
+                slider_val = info.get('slider', 50)
+                pitch_sum += slider_val
+                pitch_recs.append(f"{p}={slider_val} ({info['current']}→{info['potential']})")
 
             top_focus = max(main, key=main.get) if main else 'Movement'
+            main_sum = sum(main.values())
 
             plans.append({
                 'Name': name, 'POS': pos, 'Age': age, 'TM': team,
@@ -273,7 +361,9 @@ def generate_dev_plan(df):
                 'Movement': main.get('Movement', 50),
                 'Control': main.get('Control', 50),
                 'Stamina': main.get('Stamina', 50),
-                'Top Pitches': ' | '.join(pitch_recs),
+                'Main Sum': main_sum,
+                'Pitches': ' | '.join(pitch_recs[:4]),
+                'Pitch Sum': pitch_sum,
                 'Plan': f"Focus: {top_focus}"
             })
         else:
@@ -342,7 +432,7 @@ def render_development(uploaded_df=None):
         if pitch_plans.empty:
             st.info("No pitcher prospects under the age threshold.")
         else:
-            display_cols = ['Name', 'POS', 'Age', 'Focus', 'Movement', 'Control', 'Stamina', 'Top Pitches']
+            display_cols = ['Name', 'POS', 'Age', 'Focus', 'Movement', 'Control', 'Stamina', 'Main Sum', 'Pitches', 'Pitch Sum']
             display_cols = [c for c in display_cols if c in pitch_plans.columns]
             st.subheader(f"Pitcher Development Plans ({len(pitch_plans)} players)")
             st.dataframe(pitch_plans[display_cols].sort_values('Age'), use_container_width=True, hide_index=True)
