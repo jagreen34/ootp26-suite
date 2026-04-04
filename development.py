@@ -116,20 +116,49 @@ def calc_batter_sliders(row):
         weight = BAT_WEIGHT_MAP[slider_name]
         priorities[slider_name] = weight * gap
 
-    # Normalize to 0-100 scale, summing to ~350 (midpoint for 7 sliders)
+    # Normalize to fixed budget (zero-sum constraint)
+    # 7 sliders x 50 midpoint = 350 total budget
+    BUDGET = 350
+    MIN_SLIDER = 10
+    MAX_SLIDER = 90
+
     total_priority = sum(priorities.values())
     if total_priority == 0:
-        # Player is at potential everywhere — even distribution
         return {k: 50 for k in priorities}
 
+    # Distribute budget proportionally
     sliders = {}
     for name, prio in priorities.items():
-        # Scale: 0 priority = 15 (minimum attention), max priority = 85
-        raw = (prio / total_priority) * 100
-        sliders[name] = max(10, min(90, int(raw * 7 / 100 * 85 + 15)))
+        sliders[name] = (prio / total_priority) * BUDGET
 
-    # Adjust so they roughly balance (zero-sum constraint)
-    # The game enforces this, so we just show recommended emphasis
+    # Clamp and redistribute
+    for _ in range(10):
+        excess = 0
+        n_free = 0
+        for name, val in sliders.items():
+            if val > MAX_SLIDER:
+                excess += val - MAX_SLIDER
+                sliders[name] = MAX_SLIDER
+            elif val < MIN_SLIDER:
+                excess -= MIN_SLIDER - val
+                sliders[name] = MIN_SLIDER
+            else:
+                n_free += 1
+        if abs(excess) < 0.5 or n_free == 0:
+            break
+        per_free = excess / n_free
+        for name, val in sliders.items():
+            if MIN_SLIDER < val < MAX_SLIDER:
+                sliders[name] = max(MIN_SLIDER, min(MAX_SLIDER, val + per_free))
+
+    sliders = {k: int(round(v)) for k, v in sliders.items()}
+
+    # Final nudge to hit exact budget
+    diff = BUDGET - sum(sliders.values())
+    if diff != 0:
+        top = max(priorities, key=priorities.get)
+        sliders[top] = max(MIN_SLIDER, min(MAX_SLIDER, sliders[top] + diff))
+
     return sliders
 
 
@@ -153,14 +182,43 @@ def calc_pitcher_sliders(row):
         weight = PITCH_WEIGHT_MAP[slider_name]
         priorities[slider_name] = weight * gap
 
+    # Zero-sum budget: 3 sliders x 50 = 150
+    BUDGET = 150
+    MIN_SLIDER = 10
+    MAX_SLIDER = 90
+
     total = sum(priorities.values())
     if total == 0:
         return {'main': {k: 50 for k in priorities}, 'pitches': {}}
 
     sliders = {}
     for name, prio in priorities.items():
-        raw = (prio / total) * 100
-        sliders[name] = max(10, min(90, int(raw)))
+        sliders[name] = (prio / total) * BUDGET
+
+    for _ in range(10):
+        excess = 0
+        n_free = 0
+        for name, val in sliders.items():
+            if val > MAX_SLIDER:
+                excess += val - MAX_SLIDER
+                sliders[name] = MAX_SLIDER
+            elif val < MIN_SLIDER:
+                excess -= MIN_SLIDER - val
+                sliders[name] = MIN_SLIDER
+            else:
+                n_free += 1
+        if abs(excess) < 0.5 or n_free == 0:
+            break
+        per_free = excess / n_free
+        for name, val in sliders.items():
+            if MIN_SLIDER < val < MAX_SLIDER:
+                sliders[name] = max(MIN_SLIDER, min(MAX_SLIDER, val + per_free))
+
+    sliders = {k: int(round(v)) for k, v in sliders.items()}
+    diff = BUDGET - sum(sliders.values())
+    if diff != 0:
+        top = max(priorities, key=priorities.get)
+        sliders[top] = max(MIN_SLIDER, min(MAX_SLIDER, sliders[top] + diff))
 
     # Pitch type sliders — focus on best 2-3 pitches
     pitch_sliders = {}

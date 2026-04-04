@@ -157,7 +157,7 @@ if f:
 st.sidebar.markdown("---")
 
 mode = st.sidebar.radio("Mode", ["🏠 Quick Eval","📋 Offseason Phase 1","🎯 Trade Targets","📝 Draft Board",
-    "⚾ Lineup Optimizer","🏟️ Lineup Construction","⚙️ Pitching Staff","📊 Draft Value","🔄 Trade Builder","🌱 Development","📖 Reference"])
+    "⚾ Lineup Optimizer","🏟️ Lineup Construction","⚙️ Pitching Staff","📊 Draft Value","🔄 Trade Builder","🌱 Development","🧑 Player Strategy","📖 Reference"])
 
 def get_data(): return st.session_state.get('roster', None)
 
@@ -260,6 +260,10 @@ elif mode == "🔄 Trade Builder":
 elif mode == "🌱 Development":
     import development as dev
     dev.render_development(get_data())
+
+elif mode == "🧑 Player Strategy":
+    import player_strategy as ps
+    ps.render_player_strategy(get_data())
 
 elif mode == "📖 Reference":
     st.header("System Reference")
